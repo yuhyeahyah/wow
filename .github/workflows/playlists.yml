@@ -1,0 +1,51 @@
+name: Atualizar playlists
+
+on:
+  # Quem dispara é o Worker do Cloudflare (Gatilho cron "15 0 * * *"):
+  # 00:15 UTC = 21:15 de Brasília, logo depois das playlists atualizarem (~21:00).
+  # O "schedule" do GitHub foi removido porque ele atrasa ou pula execuções.
+  #
+  # Também dá pra rodar na mão pelo botão "Run workflow" no GitHub.
+  workflow_dispatch:
+
+permissions:
+  contents: write # necessário pro commit do playlists.enc
+
+concurrency:
+  group: playlists
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Raspar playlists
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
+        run: deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY scrape-playlists.ts
+
+      - name: Commitar se mudou
+        run: |
+          git config user.name "playlists-bot"
+          git config user.email "playlists-bot@users.noreply.github.com"
+          # Remove o playlists.json antigo (texto puro) do repositório, se ainda existir.
+          git rm -q -f --ignore-unmatch playlists.json
+          # add ANTES de comparar: "git diff" sozinho ignora arquivo novo (untracked)
+          git add playlists.enc
+          if git diff --cached --quiet -- playlists.enc playlists.json; then
+            echo "Sem mudanças, nada a commitar"
+            exit 0
+          fi
+          git commit -m "playlists: atualiza $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push
