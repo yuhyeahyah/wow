@@ -138,6 +138,25 @@ function img(src: string, w: number, h: number, style: Record<string, unknown> =
 }
 
 // -----------------------------------------------------------------
+// Logo FAMOU$ (SVG vetorizado, branco). Embutido no código: sem download,
+// sem risco de falha, e o Satori aceita SVG em data URI.
+// -----------------------------------------------------------------
+const LOGO_W = 1449, LOGO_H = 240;
+const LOGO_PATH =
+  "M1282,233C1282,227 1281,227 1278,226C1255,220 1247,216 1235,205C1226,195 1220,185 1216,173L1215,167L1212,175C1203,208 1180,225 1140,227C1092,229 1064,212 1053,174L1051,164L1050,91L1050,18L1067,18L1085,18L1085,89C1086,152 1086,161 1087,166C1094,189 1108,198 1134,198C1160,198 1174,187 1179,163C1181,156 1181,145 1181,87L1181,18L1199,18L1217,18L1217,88C1217,127 1216,159 1216,160C1216,161 1218,162 1233,162L1251,162L1251,166C1253,177 1264,190 1274,194C1294,203 1326,199 1340,187C1349,180 1352,166 1347,156C1342,147 1332,142 1294,134C1267,128 1260,126 1250,121C1233,112 1223,99 1221,82C1216,52 1238,26 1275,17L1282,16L1282,8L1282,1L1300,1L1317,1L1317,9C1317,14 1317,16 1318,16C1319,17 1323,18 1326,18C1345,23 1362,35 1371,50C1375,56 1379,67 1379,71L1379,73L1361,73L1343,73L1340,66C1332,51 1319,44 1298,44C1271,44 1253,57 1255,74C1257,90 1265,93 1321,106C1366,116 1383,130 1384,159C1385,176 1381,187 1372,199C1363,212 1342,222 1322,226L1317,226L1317,233L1317,239L1300,239L1282,239L1282,233ZM17,206C12,189 7,168 5,160C3,152 1,145 1,144C1,144 3,140 5,135L10,127L49,127C87,127 89,127 89,125C88,124 79,109 69,90L50,57L56,47C59,42 64,33 67,28L73,18L156,17L240,17L241,22C242,25 244,31 245,36C246,41 248,47 249,51C251,57 258,84 258,86C258,87 226,87 186,87L114,87L112,91C108,97 91,126 91,127C91,127 108,127 129,127L167,126L175,140C179,147 188,163 194,174C201,186 206,195 206,195C206,196 188,196 167,197L128,197L126,193C124,191 116,176 106,160C97,143 89,130 89,130C89,130 79,147 67,168C55,188 41,212 36,221C31,230 27,238 26,238C26,238 22,224 17,206ZM933,226C878,219 842,169 848,109C854,49 895,13 953,15C1007,17 1043,53 1048,109C1054,165 1024,212 975,224C967,226 942,227 933,226ZM297,121L298,18L365,17L432,17L432,32L432,48L382,48L332,48L332,77L332,106L382,106L431,106L431,120L432,134L435,124C437,117 444,99 449,84C455,68 462,46 466,36L472,17L506,17L539,18L565,92C579,134 593,173 596,180C598,188 600,194 601,195C601,196 602,156 602,107L602,17L636,17C667,17 670,17 671,19C671,20 679,50 688,85C698,120 706,154 708,159C709,164 713,179 716,192C719,205 722,216 723,217C723,218 728,201 760,74C768,45 774,20 775,19L776,17L810,17L844,17L844,120L844,224L826,224L809,224L809,125C809,63 808,27 808,28C807,30 803,48 797,69C786,111 769,175 762,204L756,224L723,224L690,224L686,210C684,202 677,177 672,155C656,96 643,48 640,36L637,24L637,124L637,224L605,224L573,224L564,194L554,165L506,165L457,165L448,194L438,224L419,224C408,224 401,224 401,223C401,223 401,221 402,220C402,219 409,200 416,178C424,157 430,139 431,138C431,136 428,136 382,136L332,136L332,180L332,224L314,224L297,224L297,121ZM964,196C998,188 1018,147 1011,103C1004,61 972,37 935,44C904,51 886,78 884,117C883,159 902,190 934,197C941,198 957,198 964,196ZM543,134C543,133 509,32 507,26C506,25 506,24 505,24C505,25 468,134 468,135C468,135 485,135 506,135C527,135 543,135 543,134ZM1409,70C1381,58 1390,17 1421,17C1430,17 1437,20 1442,27C1447,34 1448,38 1448,47C1447,67 1427,79 1409,70ZM1428,67C1447,61 1450,36 1433,25C1423,17 1407,21 1400,32C1388,51 1407,75 1428,67ZM1409,45L1410,28L1414,28C1427,27 1433,31 1433,38C1433,42 1430,46 1427,47C1426,48 1426,48 1428,51C1429,52 1431,55 1432,57L1434,61L1432,61C1430,61 1428,60 1425,54C1422,48 1422,48 1417,48L1413,48L1413,54C1413,60 1413,61 1411,61C1409,61 1409,60 1409,45ZM1427,42C1432,37 1428,32 1419,32L1413,32L1413,37C1413,44 1413,44 1420,44C1424,44 1426,44 1427,42Z";
+
+const LOGO_URI = "data:image/svg+xml;base64," + btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${LOGO_W}" height="${LOGO_H}" viewBox="0 0 ${LOGO_W} ${LOGO_H}">` +
+    `<path d="${LOGO_PATH}" fill="#ffffff" fill-rule="evenodd"/></svg>`,
+);
+
+// Logo com altura h (a largura segue a proporção)
+function logo(h: number, style: Record<string, unknown> = {}): N {
+  const w = Math.round(h * LOGO_W / LOGO_H);
+  return img(LOGO_URI, w, h, style);
+}
+
+// -----------------------------------------------------------------
 // Imagens -> base64 (com retry, detecção de formato e validação)
 // -----------------------------------------------------------------
 const UA =
@@ -1154,9 +1173,9 @@ function buildClassic(): N {
       background: `linear-gradient(to bottom, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.55) 55%, ${BG} 100%)`,
     }),
     el({
-      position: "absolute", top: "28px", left: "40px", padding: "8px 18px", borderRadius: "30px",
-      background: "rgba(0,0,0,0.45)", fontSize: "16px", fontWeight: 900, letterSpacing: "3px", color: "white",
-    }, "FAMOU$"),
+      position: "absolute", top: "28px", left: "40px", padding: "10px 20px", borderRadius: "30px",
+      background: "rgba(0,0,0,0.45)", alignItems: "center",
+    }, logo(24)),
     worldRank
       ? el({
         position: "absolute", top: "28px", right: "40px", padding: "10px 26px", borderRadius: "50px",
@@ -1304,10 +1323,9 @@ function buildMidnight(): N {
       background: `linear-gradient(to bottom, rgba(0,0,0,0.25) 0%, rgba(12,12,20,0.9) 70%, ${BG} 100%)`,
     }),
     el({
-      position: "absolute", top: "24px", left: "40px", padding: "8px 18px", borderRadius: "30px",
-      background: accent(0.3), border: `1px solid ${accent(0.7)}`,
-      fontSize: "16px", fontWeight: 900, letterSpacing: "3px", color: "white",
-    }, "FAMOU$"),
+      position: "absolute", top: "24px", left: "40px", padding: "10px 20px", borderRadius: "30px",
+      background: accent(0.3), border: `1px solid ${accent(0.7)}`, alignItems: "center",
+    }, logo(24)),
     worldRank
       ? el({
         position: "absolute", top: "24px", right: "40px", padding: "10px 26px", borderRadius: "50px",
@@ -1438,9 +1456,9 @@ function buildSocial(): N {
       background: `linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.4) 60%, ${BG} 100%)`,
     }),
     el({
-      position: "absolute", top: "20px", left: "32px", padding: "6px 14px", borderRadius: "20px",
-      background: "rgba(0,0,0,0.5)", fontSize: "14px", fontWeight: 900, letterSpacing: "3px", color: "white",
-    }, "FAMOU$"),
+      position: "absolute", top: "20px", left: "32px", padding: "8px 16px", borderRadius: "20px",
+      background: "rgba(0,0,0,0.5)", alignItems: "center",
+    }, logo(20)),
     worldRank
       ? el({
         position: "absolute", top: "20px", right: "32px", padding: "6px 20px", borderRadius: "20px",
@@ -1609,7 +1627,7 @@ function buildCompact(): N {
       )
     ),
     el({ flexDirection: "row", justifyContent: "flex-end", marginTop: "18px" }, [
-      el({ fontSize: "11px", fontWeight: 900, color: textRgba(0.25), letterSpacing: "3px" }, "FAMOU$"),
+      logo(16, { opacity: 0.3 }),
     ]),
   ]);
 
