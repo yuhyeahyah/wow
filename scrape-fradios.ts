@@ -1,7 +1,7 @@
 // scrape-fradios.ts — roda no GitHub Actions (Deno)
 // Raspa TODAS as listas do FRadios e grava UM arquivo criptografado (AES-256-GCM): fradios.enc
 //
-// Uso: SITE_URL=https://jogofamous.com PLAYLISTS_KEY=<base64 32 bytes> \
+// Uso: SITE_URL= PLAYLISTS_KEY=<base64 32 bytes> \
 //      deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,FAMOUS_EMAIL,FAMOUS_PASSWORD scrape-fradios.ts
 
 import { encrypt } from "./crypto.ts";
@@ -197,7 +197,7 @@ async function main() {
   // abre sem login; se a página não vier com a tabela, tenta logar
   const first = SECTIONS[0];
   let html = await fetchText(`${BASE}/fradios?${first.q}`);
-  if (!html.includes("gradient-text2")) {
+  if (!/class="gradient-text2">/.test(html)) {
     if (!EMAIL || !PASS) {
       console.error("❌ FRadios não abriu sem login e FAMOUS_EMAIL/FAMOUS_PASSWORD não estão nos secrets do GitHub");
       Deno.exit(1);
@@ -205,7 +205,7 @@ async function main() {
     console.log("🔑 FRadios exigiu login, entrando...");
     await login();
     html = await fetchText(`${BASE}/fradios?${first.q}`);
-    if (!html.includes("gradient-text2")) {
+    if (!/class="gradient-text2">/.test(html)) {
       console.error("❌ mesmo logado a página não trouxe a tabela, abortando");
       Deno.exit(1);
     }
