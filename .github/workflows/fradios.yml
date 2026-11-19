@@ -1,0 +1,48 @@
+name: Atualizar FRadios
+
+on:
+  # Quem dispara é o Worker (cron "52 21 * * *" = 18:52 de Brasília,
+  # logo depois da atualização das rádios, ~18:51).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fradios
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Raspar FRadios
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
+          # opcionais: só usados se o FRadios exigir login
+          FAMOUS_EMAIL: ${{ secrets.FAMOUS_EMAIL }}
+          FAMOUS_PASSWORD: ${{ secrets.FAMOUS_PASSWORD }}
+        run: deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,FAMOUS_EMAIL,FAMOUS_PASSWORD scrape-fradios.ts
+
+      - name: Commitar se mudou
+        run: |
+          git config user.name "playlists-bot"
+          git config user.email "playlists-bot@users.noreply.github.com"
+          git add fradios.enc
+          if git diff --cached --quiet -- fradios.enc; then
+            echo "Sem mudanças, nada a commitar"
+            exit 0
+          fi
+          git commit -m "fradios: atualiza $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push
