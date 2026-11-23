@@ -473,6 +473,7 @@ function crtApplyImport(data, info, items, group) {
     const known = it.peak !== undefined; // em apuração = só o ranking conta
     const rankR = it.rankR || 1;
     const r = Math.max(known ? crtRarityFromPeak(it.peak) : 1, rankR);
+    if ((data.arq || []).includes(it.src)) continue; // arquivada (/arquivar): não recria
     const ex = data.cards.find((c) => c.src === it.src);
     if (ex) {
       if (!known) ex.r = Math.max(ex.r || 1, rankR);
