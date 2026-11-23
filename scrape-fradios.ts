@@ -119,52 +119,52 @@ async function login() {
 // ---------------- parser ----------------
 // Linha compacta: p=posição, i=id do trabalho, t=título, a=artistas [{s:slug,n:nome,f:1 se feat}],
 // m=movimento ("+1","-3","=","NEW" ou ""), s=spins, d=variação (se houver), x=1 se [IMPACTO]
+// Parser do layout novo (novembro/2026): ol.fr-lista > li.fr-row.
+// Mantem as chaves compactas consumidas pelo Worker: p,i,t,a,m,s,d,x.
+const textOnly = (html: string) => decodeHtml(stripTags(html)).replace(/\s+/g, " ").trim();
+const parseInteger = (s: string): number => {
+  const m = s.match(/[+-]?[\d.,]+/);
+  if (!m) return 0;
+  const raw = m[0];
+  // No site, pontos e virgulas em contagens sao separadores de milhar.
+  return (raw.startsWith("-") ? -1 : 1) * Number(raw.replace(/[^\d]/g, ""));
+};
+
 export function parseSection(html: string) {
-  const a = html.indexOf("<tbody>");
-  if (a === -1) return { stamp: "", rows: [] as unknown[] };
-  const b = html.indexOf("</tbody>", a);
-  const tbody = html.slice(a, b === -1 ? undefined : b);
-
-  const stampM = html.match(/question-circle[^>]*><\/i>\s*([^<]+?)\s*<\/span>/);
-  const stamp = stampM ? decodeHtml(stampM[1]) : "";
-
-  const rows = [];
-  for (const row of tbody.split("<tr>").slice(1)) {
-    const pos = row.match(/gradient-text2">\s*(\d+)\s*</);
-    const t = row.match(/trabalho\/(\d+)"[^>]*>\s*<b>([\s\S]*?)<\/b>/);
-    if (!pos || !t) continue;
-
-    const mvM = row.match(/font-size:10px">\s*\(\s*([^)]*?)\s*\)\s*<\/span>/);
-    const m = mvM ? mvM[1].replace(/\s+/g, "") : "";
-
-    const sm = row.match(/<small>([\s\S]*?)<\/small>/);
-    const smHtml = sm ? sm[1] : "";
-    const parts = smHtml.split(/feat\./i);
+  const stamp = textOnly(html.match(/class=["'][^"']*fr-atualiz[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ?? "");
+  const rows: Record<string, unknown>[] = [];
+  // Captura apenas o bloco da lista de rankings, evitando menus e outras listas.
+  const list = html.match(/<ol\b[^>]*class=["'][^"']*\bfr-lista\b[^"']*["'][^>]*>([\s\S]*?)<\/ol>/i)?.[1] ?? "";
+  for (const hit of list.matchAll(/<li\b[^>]*class=["'][^"']*\bfr-row\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi)) {
+    const row = hit[1];
+    const posHtml = row.match(/<div\b[^>]*class=["'][^"']*\bfr-pos\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? "";
+    const pos = Number(textOnly(posHtml.match(/<b[^>]*>([\s\S]*?)<\/b>/i)?.[1] ?? ""));
+    const titleLink = row.match(/<a\b[^>]*class=["'][^"']*\bfr-titulo\b[^"']*["'][^>]*href=["'][^"']*\/trabalho\/(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/i)
+      ?? row.match(/<a\b[^>]*href=["'][^"']*\/trabalho\/(\d+)[^"']*["'][^>]*class=["'][^"']*\bfr-titulo\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!pos || !titleLink) continue;
+    const sub = row.match(/<div\b[^>]*class=["'][^"']*\bfr-sub\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? "";
     const artists: { s: string; n: string; f?: 1 }[] = [];
-    parts.forEach((part, idx) => {
-      for (const mm of part.matchAll(/<a href="\.\.\/artist\/([^"]+)"[^>]*>([^<]*)<\/a>/gi)) {
-        const o: { s: string; n: string; f?: 1 } = { s: mm[1].trim(), n: decodeHtml(mm[2]).trim() };
-        if (idx > 0) o.f = 1;
-        artists.push(o);
-      }
-    });
-
-    const tds = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)];
-    const cell = tds.length ? stripTags(tds[tds.length - 1][1]).replace(/\s+/g, " ").trim() : "";
-    const sp = cell.match(/\d[\d,]*/);
-    const dl = cell.match(/\(\s*([+-])\s*([\d.,]+)\s*\)/);
-
-    const r: Record<string, unknown> = {
-      p: parseInt(pos[1], 10),
-      i: t[1],
-      t: decodeHtml(stripTags(t[2])).trim(),
-      a: artists,
-      m,
-      s: sp ? parseInt(sp[0].replace(/,/g, ""), 10) : 0,
+    const featAt = sub.search(/\bfeat\.?\b/i);
+    for (const artist of sub.matchAll(/<a\b[^>]*href=["'][^"']*\/artist\/([^"'?#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      const item: { s: string; n: string; f?: 1 } = { s: artist[1].trim(), n: textOnly(artist[2]) };
+      if (featAt >= 0 && artist.index !== undefined && artist.index > featAt) item.f = 1;
+      artists.push(item);
+    }
+    const movementMatch = row.match(/<span\b[^>]*class=["']([^"']*\bfr-mov\b[^"']*)["'][^>]*>([\s\S]*?)<\/span>/i);
+    const movementRaw = textOnly(movementMatch?.[2] ?? "");
+    const movement = movementMatch?.[1].includes("is-up") ? `+${parseInteger(movementRaw)}`
+      : movementMatch?.[1].includes("is-down") ? `-${parseInteger(movementRaw)}`
+      : movementRaw;
+    const value = row.match(/<div\b[^>]*class=["'][^"']*\bfr-valor\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? "";
+    const mainValue = value.split(/<small\b|<span\b/i)[0];
+    const delta = value.match(/<span\b[^>]*class=["'][^"']*\bfr-delta\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
+    const item: Record<string, unknown> = {
+      p: pos, i: titleLink[1], t: textOnly(titleLink[2]), a: artists,
+      m: movement, s: parseInteger(textOnly(mainValue)),
     };
-    if (dl) r.d = (dl[1] === "-" ? -1 : 1) * parseFloat(dl[2].replace(/,/g, ""));
-    if (/IMPACTO/i.test(cell)) r.x = 1;
-    rows.push(r);
+    if (delta !== undefined) item.d = parseInteger(textOnly(delta));
+    if (/\bIMPACTO\b/i.test(row)) item.x = 1;
+    rows.push(item);
   }
   return { stamp, rows };
 }
@@ -197,7 +197,7 @@ async function main() {
   // abre sem login; se a página não vier com a tabela, tenta logar
   const first = SECTIONS[0];
   let html = await fetchText(`${BASE}/fradios?${first.q}`);
-  if (!/class="gradient-text2">/.test(html)) {
+  if (!parseSection(html).rows.length) {
     if (!EMAIL || !PASS) {
       console.error("❌ FRadios não abriu sem login e FAMOUS_EMAIL/FAMOUS_PASSWORD não estão nos secrets do GitHub");
       Deno.exit(1);
@@ -205,7 +205,7 @@ async function main() {
     console.log("🔑 FRadios exigiu login, entrando...");
     await login();
     html = await fetchText(`${BASE}/fradios?${first.q}`);
-    if (!/class="gradient-text2">/.test(html)) {
+    if (!parseSection(html).rows.length) {
       console.error("❌ mesmo logado a página não trouxe a tabela, abortando");
       Deno.exit(1);
     }
