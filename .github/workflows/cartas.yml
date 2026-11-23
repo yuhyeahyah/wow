@@ -1,0 +1,37 @@
+name: Importar cartas
+
+# Disparado pelo bot (/importarlista com a página do /consulta) ou manualmente em Actions > Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "IDs dos trabalhos, separados por vírgula"
+        required: true
+      chat:
+        description: "chat_id do Telegram que recebe os avisos (opcional)"
+        required: false
+
+permissions:
+  contents: write # grava o cards.enc
+
+concurrency:
+  group: cartas
+  cancel-in-progress: false
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Importar
+        run: node scripts/importar-cartas.mjs
+        env:
+          IDS: ${{ inputs.ids }}
+          CHAT_ID: ${{ inputs.chat }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
