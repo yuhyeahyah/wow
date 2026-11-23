@@ -131,7 +131,7 @@ const parseInteger = (s: string): number => {
 };
 
 export function parseSection(html: string) {
-  const stamp = textOnly(html.match(/class=["'][^"']*fr-atualiz[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ?? "");
+  const stamp = textOnly(html.match(/<span\b[^>]*class=["'][^"']*\bfr-atual\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? html.match(/class=["'][^"']*fr-atualiz[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ?? "");
   const rows: Record<string, unknown>[] = [];
   // Captura apenas o bloco da lista de rankings, evitando menus e outras listas.
   const list = html.match(/<ol\b[^>]*class=["'][^"']*\bfr-lista\b[^"']*["'][^>]*>([\s\S]*?)<\/ol>/i)?.[1] ?? "";
