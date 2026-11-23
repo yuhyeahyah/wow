@@ -54,34 +54,25 @@ async function fetchText(url: string, tries = 3): Promise<string> {
 // -----------------------------------------------------------------
 export function parsePlaylistList(html: string) {
   const wanted: Record<string, string> = {
-    "spotify playlists": "Spotify",
-    "apple music playlists": "Apple Music",
-    "deezer playlists": "Deezer",
+    "spotify playlists": "Spotify", "apple music playlists": "Apple Music", "deezer playlists": "Deezer",
   };
-
-  // Divide a página nas <section class="subsection ...">; cada uma tem um título
-  // ("Spotify Playlists", ...) e os cards com href="../playlist/Slug".
-  const sections = html.split(/<section class="subsection/i).slice(1);
-
+  // Layout de novembro/2026: section.fm-secao > .fm-pl.
+  const sections = html.split(/<section\b[^>]*class=["'][^"']*\bfm-secao\b[^"']*["'][^>]*>/i).slice(1);
   const list: { slug: string; name: string; platform: string }[] = [];
   const seen = new Set<string>();
-
-  for (const sec of sections) {
-    const title = sec.match(
-      /<div class="heading horizontal-roll"[^>]*>\s*([^<]+?)\s*<div class="arrows">/i,
-    );
-    if (!title) continue;
-    const platform = wanted[decodeHtml(title[1]).trim().toLowerCase()];
-    if (!platform) continue; // ignora "Users Playlists" e outras
-
-    const cardRegex =
-      /<a href="\.\.\/playlist\/([^"]+)">\s*<div class="album-title"[^>]*>([^<]+)<\/div>/gi;
-    let c: RegExpExecArray | null;
-    while ((c = cardRegex.exec(sec)) !== null) {
-      const slug = c[1].trim();
+  for (const section of sections) {
+    const heading = section.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? "";
+    const title = decodeHtml(heading.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim().toLowerCase();
+    const platform = wanted[title];
+    if (!platform) continue;
+    const cards = section.split(/<div\b[^>]*class=["'][^"']*\bfm-pl\b[^"']*["'][^>]*>/i).slice(1);
+    for (const card of cards) {
+      const link = card.match(/<a\b[^>]*href=["'][^"']*\/playlist\/([^"'?#]+)["'][^>]*>\s*<b[^>]*>([\s\S]*?)<\/b>/i);
+      if (!link) continue; // Ignora link da capa e usa o titulo do card.
+      const slug = decodeHtml(link[1].trim());
       if (seen.has(slug)) continue;
       seen.add(slug);
-      list.push({ slug, name: decodeHtml(c[2].trim()), platform });
+      list.push({ slug, name: decodeHtml(link[2].replace(/<[^>]*>/g, "").trim()), platform });
     }
   }
   return list;
