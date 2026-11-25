@@ -1,6 +1,6 @@
 // Node 22+, sem dependências. Um único achievements.enc, AES-256-GCM + gzip por bloco.
-import { writeFile, readFile } from 'node:fs/promises';
-import { gzipSync } from 'node:zlib';
+import { writeFile, readFile, rename } from 'node:fs/promises';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 function siteBase() {
  const configured = process.env.SITE_URL?.trim();
@@ -118,13 +118,71 @@ const jar=new Map();
 function cookies(res){for(const c of res.headers.getSetCookie()){const [pair]=c.split(';');const i=pair.indexOf('=');if(i>0)jar.set(pair.slice(0,i),pair.slice(i+1));}}
 async function request(url, options={}) {let err;for(let i=0;i<3;i++){try{await sleep(850);const headers={'User-Agent':UA,'Accept-Language':'pt-BR',...options.headers};if(jar.size)headers.Cookie=[...jar].map(([k,v])=>`${k}=${v}`).join('; ');const r=await fetch(url,{...options,headers,redirect:'manual',signal:AbortSignal.timeout(45000)});cookies(r);if(r.status>=300&&r.status<400){const dest=new URL(r.headers.get('location')||'/',url);if(dest.origin!==new URL(BASE).origin)throw Error('Redirecionamento externo');if(options.method==='POST')return await r.text();throw Error('Redirecionamento: '+dest.pathname);}if(!r.ok){if(r.status===429)await sleep(Math.max(30000,Number(r.headers.get('retry-after')||0)*1000));throw Error('HTTP '+r.status);}return await r.text();}catch(e){err=e;await sleep(1500*(i+1));}}throw err;}
 async function login(){if(!process.env.SITE_EMAIL||!process.env.SITE_PASSWORD)throw Error('Configure os secrets de login do site se necessário');await request(BASE+'/');await request(BASE+'/login.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:BASE,Referer:BASE+'/'},body:new URLSearchParams({email:process.env.SITE_EMAIL,password:process.env.SITE_PASSWORD,login:'ENTRAR'})});}
-async function crawl(){const todo=[],seen=new Set(),done=new Set(),sections=[],failed=[];const add=p=>{const k=paramsKey(p);if(!seen.has(k)){seen.add(k);todo.push(p);}};for(const r of Object.keys(tabs))add({r});let first;try{first=parsePage(await request(BASE+'/achievements?r=charts'),{r:'charts'});}catch(e){console.log('Tentando login após:',e.message);await login();first=parsePage(await request(BASE+'/achievements?r=charts'),{r:'charts'});}
- for(let i=0;i<todo.length;i++){const p=todo[i],q=paramsKey(p);if(done.has(q))continue;try{const parsed=i===0?first:parsePage(await request(BASE+'/achievements?'+q),p);const s=parsed.section;if(s.filters.r!==p.r)throw Error('Aba retornada diferente da solicitada');for(const [k,v] of Object.entries(p)){if(k in s.filters&&String(s.filters[k])!==String(v))throw Error('Filtro retornado diferente: '+k+'='+s.filters[k]+' (solicitado '+v+')');}if(!done.has(s.q)){sections.push(s);done.add(s.q);}done.add(q);seen.add(s.q);for(const n of parsed.neighbors)add(n);if(i%25===0)console.log(`${i+1}/${todo.length}: ${s.heading} (${s.rows.length})`);}catch(e){failed.push({q,error:e.message});console.error(q,e.message);if(failed.length>=10)throw Error('10 falhas; abortando sem substituir o enc');}}
- if(failed.length)throw Error(`${failed.length} páginas falharam: ${JSON.stringify(failed)}`);if(!Object.keys(tabs).every(r=>sections.some(s=>s.filters.r===r)))throw Error('Faltam abas');return sections;}
-export async function buildFile(sections, keyB64, updatedAt=new Date().toISOString()){
- const raw=Buffer.from(keyB64,'base64');if(raw.length!==32)throw Error('PLAYLISTS_KEY precisa ter 32 bytes em base64');const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt']);
- const map=new Map(), artistNames=new Map(), workCredits=new Map();
- const add=(id,label,hit)=>{let o=map.get(id);if(!o){o={name:label,hits:[]};map.set(id,o);}else if(id.startsWith('a:')&&norm(o.name)===norm(id.slice(2))&&norm(label)!==norm(id.slice(2)))o.name=label;o.hits.push(hit);};
+// Canonicaliza somente os defaults/filtros observados nas cinco abas.
+export function canonical(p){
+ const q={...p};
+ if(q.r==='charts'){q.tipo ||= 'single';q.met ||= 'vendas';q.esc ||= 'mundo';}
+ if(q.r==='mercados'){q.met ||= 'vendas';}
+ if(q.r==='artistas'){q.lista ||= 'vendas';if(['vendas','streams'].includes(q.lista))q.esc ||= 'mundo';else {delete q.esc;delete q.ano;}}
+ if(q.r==='premios'){q.lista ||= 'premiados';if(q.lista==='award')q.award ||= 'grammy';else delete q.award;if(q.lista!=='premiados')delete q.tp;}
+ if(q.r==='turnes')q.lista ||= 'publico';
+ return Object.fromEntries(Object.entries(q).filter(([,v])=>v!==''&&v!=null));
+}
+export function inScope(p,mode,year=String(new Date().getUTCFullYear())){
+ if(mode==='completo')return true;
+ if(mode!=='rapido')return p.r===mode;
+ if(!['charts','artistas'].includes(p.r))return true;
+ const q=canonical(p);
+ return (!q.esc||q.esc==='mundo')&&(!q.ano||q.ano==='novos'||q.ano===year);
+}
+async function crawl(mode){
+ const todo=[],seen=new Set(),done=new Set(),sections=[],failed=[];
+ const add=p=>{p=canonical(p);if(!inScope(p,mode))return;const k=paramsKey(p);if(!seen.has(k)){seen.add(k);todo.push(p);}};
+ for(const r of Object.keys(tabs))add({r});
+ let first;const initial=todo[0],initialQuery=paramsKey(initial);
+ try{first=parsePage(await request(BASE+'/achievements?'+initialQuery),initial);}catch(e){console.log('Tentando login após:',e.message);await login();first=parsePage(await request(BASE+'/achievements?'+initialQuery),initial);}
+ for(let i=0;i<todo.length;i++){
+  const p=todo[i],q=paramsKey(p);if(done.has(q))continue;
+  try{
+   const parsed=i===0?first:parsePage(await request(BASE+'/achievements?'+q),p);const s=parsed.section;
+   const actual=paramsKey(canonical(s.filters));
+   if(actual!==q)throw Error('Filtros retornados diferentes dos solicitados: '+actual+' != '+q);
+   if(!done.has(actual)){sections.push(s);done.add(actual);}
+   for(const n of parsed.neighbors)add(n);
+   if(i%25===0)console.log(`${i+1}/${todo.length}: ${s.heading} (${s.rows.length})`);
+  }catch(e){failed.push({q,error:e.message});console.error(q,e.message);if(failed.length>=10)throw Error('10 falhas; abortando sem substituir o enc');}
+ }
+ if(failed.length)throw Error(`${failed.length} páginas falharam: ${JSON.stringify(failed)}`);
+ const expected=Object.keys(tabs).filter(r=>inScope({r},mode));
+ if(!expected.every(r=>sections.some(s=>s.filters.r===r)))throw Error('Faltam abas');
+ return sections;
+}
+// O archive já está dentro do formato FAMAC001; não cria arquivo auxiliar.
+export async function readArchive(file,keyB64){
+ const raw=Buffer.from(keyB64,'base64');if(raw.length!==32)throw Error('PLAYLISTS_KEY precisa ter 32 bytes em base64');
+ if(file.length<40||file.subarray(0,8).toString()!=='FAMAC001')throw Error('ENC anterior inválido');
+ const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);
+ const open=async b=>{if(b.length<28)throw Error('Bloco inválido');return JSON.parse(gunzipSync(Buffer.from(await crypto.subtle.decrypt({name:'AES-GCM',iv:b.subarray(0,12)},key,b.subarray(12)))).toString());};
+ const len=file.readUInt32BE(8),start=12+len;if(len<28||start>file.length)throw Error('Índice inválido');
+ const index=await open(file.subarray(12,start));
+ const [off,n]=index.archive||[];if(!Number.isSafeInteger(off)||!Number.isSafeInteger(n)||off<0||n<28||start+off+n>file.length)throw Error('Archive inválido');
+ const sections=await open(file.subarray(start+off,start+off+n));
+ if(!Array.isArray(sections)||sections.length!==index.count||sections.some(s=>!s.filters||!s.q||!Array.isArray(s.rows)))throw Error('Archive incompleto');
+ return {index,sections};
+}
+// Ordenação canônica: ignora ordem de chaves JSON, preserva ordem de posições.
+function stable(x){if(Array.isArray(x))return '['+x.map(stable).join(',')+']';if(x&&typeof x==='object')return '{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+stable(x[k])).join(',')+'}';return JSON.stringify(x);}
+export function mergeSections(previous,fetched){
+ const base=new Map(previous.map(s=>[paramsKey(canonical(s.filters)),s]));
+ const fresh=new Map(fetched.map(s=>[paramsKey(canonical(s.filters)),s]));
+ const merged=new Map(base);for(const [k,s] of fresh)merged.set(k,s);
+ const sections=structuredClone([...merged.values()]);resolveCredits(sections);
+ const stats={novos:0,alterados:0,iguais:0,preservados:0};
+ for(const s of sections){const k=paramsKey(canonical(s.filters)),old=base.get(k);if(!old)stats.novos++;else if(stable(old)!==stable(s))stats.alterados++;else if(fresh.has(k))stats.iguais++;else stats.preservados++;}
+ return {sections,stats};
+}
+function resolveCredits(sections){
+ const artistNames=new Map(),workCredits=new Map();
  for(const s of sections)for(const r of s.rows)for(const a of r.a){
    for(const n of [norm(a.n),norm(a.s)]){if(!artistNames.has(n))artistNames.set(n,new Set());artistNames.get(n).add(a.s.toLowerCase());}
    if(r.i){if(!workCredits.has(r.i))workCredits.set(r.i,new Map());workCredits.get(r.i).set(a.s.toLowerCase(),a);}
@@ -138,6 +196,14 @@ export async function buildFile(sections, keyB64, updatedAt=new Date().toISOStri
    }
  }
 
+ return {artistNames};
+}
+export async function buildFile(sections, keyB64, updatedAt=new Date().toISOString()){
+ const raw=Buffer.from(keyB64,'base64');if(raw.length!==32)throw Error('PLAYLISTS_KEY precisa ter 32 bytes em base64');const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt']);
+ const map=new Map();
+ const add=(id,label,hit)=>{let o=map.get(id);if(!o){o={name:label,hits:[]};map.set(id,o);}else if(id.startsWith('a:')&&norm(o.name)===norm(id.slice(2))&&norm(label)!==norm(id.slice(2)))o.name=label;o.hits.push(hit);};
+ const {artistNames}=resolveCredits(sections);
+
  for(const s of sections)for(const r of s.rows){const hit={g:s.group,h:r.heading||s.heading,c:[s.subtitle,s.filters.ano==='novos'?'Lançamentos (até 120 dias)':s.filters.ano?'Lançados em '+s.filters.ano:''].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(' · '),q:s.q,p:r.p,t:r.t,i:r.i,v:r.v,u:r.u,d:r.d,a:r.a.map(a=>a.n).join(', ')||r.artistText};if(r.i)add('t:'+r.i,r.t,hit);if(r.tour)add('u:'+r.tour,r.t,hit);const keys=new Set();for(const a of r.a){const id='a:'+a.s.toLowerCase();if(!keys.has(id)){add(id,a.n,hit);keys.add(id);}}if(r.artistText&&!r.a.length){const ids=artistNames.get(norm(r.artistText));if(ids?.size===1)add('a:'+ [...ids][0],r.artistText,hit);else add('n:'+norm(r.artistText),r.artistText,hit);}}
  const seal=async obj=>{const iv=crypto.getRandomValues(new Uint8Array(12));const gz=gzipSync(JSON.stringify(obj));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,gz);return Buffer.concat([iv,Buffer.from(ct)]);};
  const chunks=[],index={updatedAt,count:sections.length,rows:sections.reduce((n,s)=>n+s.rows.length,0),entries:{}};let off=0;
@@ -146,5 +212,20 @@ export async function buildFile(sections, keyB64, updatedAt=new Date().toISOStri
  const archive=await seal(sections);index.archive=[off,archive.length];chunks.push(archive);
  const encIndex=await seal(index);const header=Buffer.alloc(12);header.write('FAMAC001');header.writeUInt32BE(encIndex.length,8);const result=Buffer.concat([header,encIndex,...chunks]);if(result.length>90*1024*1024)throw Error('Arquivo excedeu 90 MiB; não será enviado ao GitHub');return result;
 }
-async function main(){const key=process.env.PLAYLISTS_KEY;if(!key)throw Error('PLAYLISTS_KEY ausente');const sections=process.argv[2]?[parsePage(await readFile(process.argv[2],'utf8')).section]:await crawl();const file=await buildFile(sections,key);await writeFile(process.argv[2]?'achievements-test.enc':'achievements.enc',file);console.log(`OK: ${sections.length} rankings; ${file.length} bytes`);}
+async function main(){
+ const key=process.env.PLAYLISTS_KEY;if(!key)throw Error('PLAYLISTS_KEY ausente');
+ if(process.argv[2]){const sections=[parsePage(await readFile(process.argv[2],'utf8')).section];const file=await buildFile(sections,key);await writeFile('achievements-test.enc',file);return;}
+ let old=null;try{old=await readArchive(await readFile('achievements.enc'),key);}catch(e){if(e.code!=='ENOENT')throw e;}
+ let mode=process.env.ACH_MODE||'auto';
+ if(mode==='auto')mode=old?'rapido':'completo';
+ if(!['rapido','completo',...Object.keys(tabs)].includes(mode))throw Error('Modo inválido: '+mode);
+ if(!old&&mode!=='completo')throw Error('Primeira coleta: execute o modo completo ou auto antes de atualizar parcialmente.');
+ console.log('Modo: '+mode+' | rankings anteriores: '+(old?.sections.length||0));
+ const fetched=await crawl(mode),{sections,stats}=mergeSections(old?.sections||[],fetched);
+ console.log('Comparação: '+JSON.stringify(stats)+' | consultados: '+fetched.length+' | base final: '+sections.length);
+ if(old&&!stats.novos&&!stats.alterados){console.log('Nenhuma mudança. ENC original preservado, sem novo commit.');return;}
+ const file=await buildFile(sections,key);
+ await writeFile('achievements.enc.tmp',file);await rename('achievements.enc.tmp','achievements.enc');
+ console.log(`OK: ${sections.length} rankings; ${file.length} bytes`);
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error(e);process.exitCode=1;});
