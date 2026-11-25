@@ -1,0 +1,27 @@
+name: Renderizar giros automáticos
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: Dados criptografados da página (enviado pelo bot)
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar Sharp
+        run: npm install --no-save --no-package-lock --ignore-scripts=false sharp@0.34.5
+      - name: Montar cartas e enviar
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
+          PAYLOAD_ENC: ${{ inputs.payload }}
+        run: node scripts/render-girarauto.cjs
