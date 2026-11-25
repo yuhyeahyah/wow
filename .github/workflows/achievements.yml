@@ -1,6 +1,20 @@
 name: Atualizar Achievements
 on:
   workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Auto = primeira coleta completa, depois rápida; ou escolha uma categoria'
+        type: choice
+        default: auto
+        options:
+          - auto
+          - rapido
+          - completo
+          - charts
+          - mercados
+          - artistas
+          - premios
+          - turnes
 permissions:
   contents: write
 concurrency:
@@ -19,6 +33,7 @@ jobs:
           node-version: '22'
       - name: Coletar rankings e criptografar
         env:
+          ACH_MODE: ${{ inputs.modo }}
           SITE_URL: ${{ secrets.SITE_URL }}
           PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
           SITE_EMAIL: ${{ secrets.FAMOUS_EMAIL }}
