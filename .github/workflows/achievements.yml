@@ -15,6 +15,10 @@ on:
           - artistas
           - premios
           - turnes
+      retomar:
+        description: 'Retomar checkpoint compatível (desmarque para começar do zero)'
+        type: boolean
+        default: true
 permissions:
   contents: write
 concurrency:
@@ -24,16 +28,23 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    env:
+      ACH_CHECKPOINT_BRANCH: achievements-progress/${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      - name: Configurar Git para checkpoints
+        run: |
+          git config user.name 'achievements-bot'
+          git config user.email 'achievements-bot@users.noreply.github.com'
       - name: Coletar rankings e criptografar
         env:
           ACH_MODE: ${{ inputs.modo }}
+          ACH_RESUME: ${{ inputs.retomar }}
           SITE_URL: ${{ secrets.SITE_URL }}
           PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
           SITE_EMAIL: ${{ secrets.FAMOUS_EMAIL }}
@@ -48,3 +59,10 @@ jobs:
           git commit -m "achievements: snapshot $(date -u +'%Y-%m-%d %H:%M') UTC"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
+      - name: Limpar checkpoint após publicação bem-sucedida
+        run: |
+          ref="refs/heads/${ACH_CHECKPOINT_BRANCH}"
+          head=$(git ls-remote origin "$ref" | cut -f1)
+          if [ -n "$head" ]; then
+            git push --force-with-lease="$ref:$head" origin ":$ref"
+          fi
