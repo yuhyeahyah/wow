@@ -1,5 +1,7 @@
 // Node 22+, sem dependências. Um único achievements.enc, AES-256-GCM + gzip por bloco.
-import { writeFile, readFile, rename } from 'node:fs/promises';
+import { writeFile, readFile, rename, unlink } from 'node:fs/promises';
+import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 function siteBase() {
@@ -135,26 +137,89 @@ export function inScope(p,mode,year=String(new Date().getUTCFullYear())){
  const q=canonical(p);
  return (!q.esc||q.esc==='mundo')&&(!q.ano||q.ano==='novos'||q.ano===year);
 }
-async function crawl(mode){
+// Checkpoint separado do arquivo que o bot consome. No Actions fica em uma
+// branch exclusiva, com um único commit sem histórico acumulado. AES-GCM + gzip.
+const CHECKPOINT_MAGIC=Buffer.from('FAMCP001');
+const CHECKPOINT_FILE='achievements-progress.enc';
+const digest=b=>createHash('sha256').update(b).digest('hex');
+export function sealCheckpoint(state,keyB64){
+ const key=Buffer.from(keyB64,'base64');if(key.length!==32)throw Error('PLAYLISTS_KEY precisa ter 32 bytes em base64');
+ const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key,iv);cipher.setAAD(CHECKPOINT_MAGIC);
+ const body=Buffer.concat([cipher.update(gzipSync(JSON.stringify(state))),cipher.final()]);
+ const result=Buffer.concat([CHECKPOINT_MAGIC,iv,cipher.getAuthTag(),body]);
+ if(result.length>90*1024*1024)throw Error('Checkpoint excedeu 90 MiB');return result;
+}
+export function openCheckpoint(raw,keyB64){
+ const key=Buffer.from(keyB64,'base64');if(key.length!==32||raw.length<36||!raw.subarray(0,8).equals(CHECKPOINT_MAGIC))throw Error('Checkpoint inválido');
+ const cipher=createDecipheriv('aes-256-gcm',key,raw.subarray(8,20));cipher.setAAD(CHECKPOINT_MAGIC);cipher.setAuthTag(raw.subarray(20,36));
+ return JSON.parse(gunzipSync(Buffer.concat([cipher.update(raw.subarray(36)),cipher.final()])).toString());
+}
+export function checkpointStore(key){
+ const branch=process.env.ACH_CHECKPOINT_BRANCH;
+ const ref=branch?'refs/heads/'+branch:null;
+ let head='';
+ const git=(args,input)=>execFileSync('git',args,{input,maxBuffer:128*1024*1024,stdio:['pipe','pipe','inherit']});
+ if(ref)git(['check-ref-format',ref]);
+ return {
+  async load(){
+   let raw;
+   if(ref){
+    head=git(['ls-remote','--heads','origin',ref]).toString().trim().split(/\s+/)[0]||'';
+    if(!head)return null;
+    git(['fetch','--no-tags','--depth=1','origin',ref]);
+    head=git(['rev-parse','FETCH_HEAD']).toString().trim();
+    raw=git(['show',head+':'+CHECKPOINT_FILE]);
+   }else{try{raw=await readFile(CHECKPOINT_FILE);}catch(e){if(e.code==='ENOENT')return null;throw e;}}
+   return openCheckpoint(raw,key);
+  },
+  async save(state){
+   const raw=sealCheckpoint(state,key);
+   if(ref){
+    const blob=git(['hash-object','-w','--stdin'],raw).toString().trim();
+    const tree=git(['mktree'],`100644 blob ${blob}\t${CHECKPOINT_FILE}\n`).toString().trim();
+    const commit=git(['commit-tree',tree,'-m',`achievements: checkpoint ${state.sections.length}/${state.todo.length}`]).toString().trim();
+    // A lease impede sobrescrever o progresso de outra execução por engano.
+    git(['push',`--force-with-lease=${ref}:${head}`,'origin',`${commit}:${ref}`]);head=commit;
+   }else{await writeFile(CHECKPOINT_FILE+'.tmp',raw);await rename(CHECKPOINT_FILE+'.tmp',CHECKPOINT_FILE);}
+  },
+  async clearLocal(){if(!ref)await unlink(CHECKPOINT_FILE).catch(e=>{if(e.code!=='ENOENT')throw e;});}
+ };
+}
+export async function crawl(mode,{resume=null,save=async()=>{},fetchPage=null,checkpointEvery=100}={}){
  const todo=[],seen=new Set(),done=new Set(),sections=[],failed=[];
  const add=p=>{p=canonical(p);if(!inScope(p,mode))return;const k=paramsKey(p);if(!seen.has(k)){seen.add(k);todo.push(p);}};
+ if(resume){
+  if(!Array.isArray(resume.todo)||!Array.isArray(resume.sections))throw Error('Checkpoint incompleto');
+  for(const p of resume.todo)add(p);
+  for(const s of resume.sections){const q=paramsKey(canonical(s.filters));if(!seen.has(q)||done.has(q)||!Array.isArray(s.rows))throw Error('Checkpoint inconsistente');sections.push(s);done.add(q);}
+ }
  for(const r of Object.keys(tabs))add({r});
- let first;const initial=todo[0],initialQuery=paramsKey(initial);
- try{first=parsePage(await request(BASE+'/achievements?'+initialQuery),initial);}catch(e){console.log('Tentando login após:',e.message);await login();first=parsePage(await request(BASE+'/achievements?'+initialQuery),initial);}
+ if(resume)console.log(`Retomando: ${done.size} rankings concluídos, ${todo.length-done.size} pendentes conhecidos`);
+ let initialized=false,unsaved=0,lastSave=Date.now();
+ const fetchParsed=fetchPage|| (async(p,q)=>{
+  try{return parsePage(await request(BASE+'/achievements?'+q),p);}catch(e){
+   if(initialized)throw e;
+   console.log('Tentando login após:',e.message);await login();return parsePage(await request(BASE+'/achievements?'+q),p);
+  }
+ });
+ const persist=async()=>{await save({todo,sections});unsaved=0;lastSave=Date.now();console.log(`Checkpoint salvo: ${done.size} concluídos / ${todo.length} descobertos`);};
  for(let i=0;i<todo.length;i++){
   const p=todo[i],q=paramsKey(p);if(done.has(q))continue;
   try{
-   const parsed=i===0?first:parsePage(await request(BASE+'/achievements?'+q),p);const s=parsed.section;
+   const parsed=await fetchParsed(p,q);initialized=true;const s=parsed.section;
    const actual=paramsKey(canonical(s.filters));
    if(actual!==q)throw Error('Filtros retornados diferentes dos solicitados: '+actual+' != '+q);
-   if(!done.has(actual)){sections.push(s);done.add(actual);}
+   // Descobrir a fila antes de marcar a página como concluída.
    for(const n of parsed.neighbors)add(n);
-   if(i%25===0)console.log(`${i+1}/${todo.length}: ${s.heading} (${s.rows.length})`);
-  }catch(e){failed.push({q,error:e.message});console.error(q,e.message);if(failed.length>=10)throw Error('10 falhas; abortando sem substituir o enc');}
+   sections.push(s);done.add(actual);unsaved++;
+   if(done.size===1||done.size%25===0)console.log(`${done.size} concluídos / ${todo.length} descobertos | ${todo.length-done.size} pendentes | ${s.heading} (${s.rows.length})`);
+  }catch(e){failed.push({q,error:e.message});console.error(q,e.message);if(failed.length>=10)break;}
+  if(unsaved&&(unsaved>=checkpointEvery||Date.now()-lastSave>=120000))await persist();
  }
- if(failed.length)throw Error(`${failed.length} páginas falharam: ${JSON.stringify(failed)}`);
+ if(unsaved||!resume)await persist();
+ if(failed.length)throw Error(`${failed.length} páginas falharam; progresso salvo, ENC final preservado. ${JSON.stringify(failed)}`);
  const expected=Object.keys(tabs).filter(r=>inScope({r},mode));
- if(!expected.every(r=>sections.some(s=>s.filters.r===r)))throw Error('Faltam abas');
+ if(done.size!==todo.length||!expected.every(r=>sections.some(s=>s.filters.r===r)))throw Error('Coleta incompleta');
  return sections;
 }
 // O archive já está dentro do formato FAMAC001; não cria arquivo auxiliar.
@@ -215,17 +280,25 @@ export async function buildFile(sections, keyB64, updatedAt=new Date().toISOStri
 async function main(){
  const key=process.env.PLAYLISTS_KEY;if(!key)throw Error('PLAYLISTS_KEY ausente');
  if(process.argv[2]){const sections=[parsePage(await readFile(process.argv[2],'utf8')).section];const file=await buildFile(sections,key);await writeFile('achievements-test.enc',file);return;}
- let old=null;try{old=await readArchive(await readFile('achievements.enc'),key);}catch(e){if(e.code!=='ENOENT')throw e;}
+ let old=null,baseDigest='none';try{const raw=await readFile('achievements.enc');old=await readArchive(raw,key);baseDigest=digest(raw);}catch(e){if(e.code!=='ENOENT')throw e;}
  let mode=process.env.ACH_MODE||'auto';
  if(mode==='auto')mode=old?'rapido':'completo';
  if(!['rapido','completo',...Object.keys(tabs)].includes(mode))throw Error('Modo inválido: '+mode);
  if(!old&&mode!=='completo')throw Error('Primeira coleta: execute o modo completo ou auto antes de atualizar parcialmente.');
  console.log('Modo: '+mode+' | rankings anteriores: '+(old?.sections.length||0));
- const fetched=await crawl(mode),{sections,stats}=mergeSections(old?.sections||[],fetched);
+ const store=checkpointStore(key),meta={version:1,mode,baseDigest,site:BASE,year:String(new Date().getUTCFullYear())};
+ const previous=await store.load(); // também registra a referência remota para a lease
+ const compatible=previous&&Object.entries(meta).every(([k,v])=>previous[k]===v);
+ const resume=process.env.ACH_RESUME==='false'?null:compatible?previous:null;
+ if(previous&&!resume)console.log('Checkpoint anterior ignorado (modo, base, ano ou opção de reinício).');
+ // Substitui o progresso antigo antes de iniciar uma coleta nova, inclusive se cancelada cedo.
+ if(!resume)await store.save({...meta,todo:Object.keys(tabs).filter(r=>inScope({r},mode)).map(r=>canonical({r})),sections:[]});
+ const fetched=await crawl(mode,{resume,save:state=>store.save({...meta,...state})}),{sections,stats}=mergeSections(old?.sections||[],fetched);
  console.log('Comparação: '+JSON.stringify(stats)+' | consultados: '+fetched.length+' | base final: '+sections.length);
- if(old&&!stats.novos&&!stats.alterados){console.log('Nenhuma mudança. ENC original preservado, sem novo commit.');return;}
+ if(old&&!stats.novos&&!stats.alterados){console.log('Nenhuma mudança. ENC original preservado, sem novo commit.');await store.clearLocal();return;}
  const file=await buildFile(sections,key);
  await writeFile('achievements.enc.tmp',file);await rename('achievements.enc.tmp','achievements.enc');
+ await store.clearLocal();
  console.log(`OK: ${sections.length} rankings; ${file.length} bytes`);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error(e);process.exitCode=1;});
