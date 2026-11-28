@@ -1,0 +1,31 @@
+name: Proxy
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          npm init -y
+          npm install https-proxy-agent socks-proxy-agent
+
+      - name: Run
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        run: node proxy.js
