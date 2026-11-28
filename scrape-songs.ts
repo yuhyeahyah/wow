@@ -1,8 +1,8 @@
 // scrape-songs.ts — roda no GitHub Actions (Deno)
 // Raspa todas as regiões do FTunes e grava UM arquivo criptografado (AES-256-GCM): songs.enc
 //
-// Uso: SITE_URL=https://jogofamous.com PLAYLISTS_KEY=<base64 32 bytes> \
-//      deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,FTUNES_REGIONS scrape-songs.ts
+// Uso: SITE_URL= PLAYLISTS_KEY=<base64 32 bytes> \
+//      deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,REGIONS scrape-songs.ts
 
 import { encrypt } from "./crypto.ts";
 
@@ -14,17 +14,17 @@ const PAUSE_MS = 400;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Regions vem do secret FTUNES_REGIONS (JSON)
+// Regions vem do secret REGIONS (JSON)
 // Formato: [{"name":"Worldwide","emoji":"🌐","param":"wwsongs"}, ...]
 function loadRegions(): { name: string; emoji: string; param: string }[] {
-  const raw = (Deno.env.get("FTUNES_REGIONS") ?? "").trim();
-  if (!raw) throw new Error("FTUNES_REGIONS não configurado (secret)");
+  const raw = (Deno.env.get("REGIONS") ?? "").trim();
+  if (!raw) throw new Error("REGIONS não configurado (secret)");
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || !parsed.length) throw new Error("vazio");
     return parsed.filter((r) => r && r.param);
   } catch (e) {
-    throw new Error("FTUNES_REGIONS inválido: " + (e as Error).message);
+    throw new Error("REGIONS inválido: " + (e as Error).message);
   }
 }
 
