@@ -30,7 +30,7 @@ jobs:
           SITE_URL: ${{ secrets.SITE_URL }}
           PLAYLISTS_KEY: ${{ secrets.PLAYLISTS_KEY }}
           FTUNES_REGIONS: ${{ secrets.FTUNES_REGIONS }}
-        run: deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,FTUNES_REGIONS scrape-ftunes.ts
+        run: deno run --allow-net --allow-write --allow-env=SITE_URL,PLAYLISTS_KEY,FTUNES_REGIONS scrape-songs.ts
 
       - name: Commitar se mudou
         run: |
